@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Crypto Pulse — Live Price Tracker</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body {
+    background:
+      radial-gradient(60rem 40rem at 10% -10%, rgba(16,185,129,.12), transparent 60%),
+      radial-gradient(50rem 40rem at 100% 0%, rgba(99,102,241,.14), transparent 60%),
+      #09090b;
+  }
+  .glass {
+    background: linear-gradient(145deg, rgba(39,39,42,.55), rgba(24,24,27,.45));
+    border: 1px solid rgba(255,255,255,.08);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    box-shadow: 0 10px 40px -12px rgba(0,0,0,.6), inset 0 1px 0 rgba(255,255,255,.05);
+  }
+  .card { transition: transform .3s ease, border-color .3s ease; }
+  .card:hover { transform: translateY(-4px); border-color: rgba(255,255,255,.18); }
+  .up   { color: #34ff8f; text-shadow: 0 0 18px rgba(52,255,143,.35); }
+  .down { color: #ff4d6d; text-shadow: 0 0 18px rgba(255,77,109,.35); }
+  .pill-up   { background: rgba(52,255,143,.1); border: 1px solid rgba(52,255,143,.3); }
+  .pill-down { background: rgba(255,77,109,.1); border: 1px solid rgba(255,77,109,.3); }
+  @keyframes flashUp   { 0%{box-shadow:0 0 0 0 rgba(52,255,143,.6)}  100%{box-shadow:0 0 0 24px rgba(52,255,143,0)} }
+  @keyframes flashDown { 0%{box-shadow:0 0 0 0 rgba(255,77,109,.6)} 100%{box-shadow:0 0 0 24px rgba(255,77,109,0)} }
+  .flash-up   { animation: flashUp 1s ease-out; }
+  .flash-down { animation: flashDown 1s ease-out; }
+  .skeleton { position: relative; overflow: hidden; background: rgba(255,255,255,.06); border-radius: .5rem; }
+  .skeleton::after { content:""; position:absolute; inset:0; transform:translateX(-100%);
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.08), transparent);
+    animation: shimmer 1.3s infinite; }
+  @keyframes shimmer { to { transform: translateX(100%); } }
+  .spin { animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  #gauge-dot { transition: left .8s cubic-bezier(.2,.8,.2,1); }
+  .fade-in { animation: fade .5s ease both; }
+  @keyframes fade { from { opacity:0; transform: translateY(8px);} to { opacity:1; transform:none; } }
+</style>
+</head>
+<body class="min-h-screen text-zinc-200 antialiased font-sans">
+<div class="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+
+  <!-- Header -->
+  <header class="flex flex-wrap items-center justify-between gap-4 mb-6">
+    <div class="flex items-center gap-3">
+      <div class="h-10 w-10 rounded-xl bg-emerald-400/10 border border-emerald-400/30 grid place-items-center">
+        <svg class="h-5 w-5 text-emerald-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>
+      </div>
+      <div>
+        <h1 class="text-xl font-semibold tracking-tight text-white">Crypto Pulse</h1>
+        <p class="text-xs text-zinc-500">Live market tracker</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-3">
+      <div class="hidden sm:flex items-center gap-2 text-xs text-zinc-400">
+        <span class="relative flex h-2 w-2">
+          <span id="live-ping" class="absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-60 animate-ping"></span>
+          <span id="live-dot" class="relative inline-flex h-2 w-2 rounded-full bg-emerald-400"></span>
+        </span>
+        <span id="status-text">Connecting…</span>
+      </div>
+      <button id="refresh-btn" class="glass flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-medium text-zinc-100 hover:border-emerald-400/40 hover:text-emerald-300 transition disabled:opacity-60 disabled:cursor-not-allowed">
+        <svg id="refresh-icon" class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v6h6M20 20v-6h-6M20 9A8 8 0 006.3 6.3L4 10m16 4l-2.3 3.7A8 8 0 014 15"/></svg>
+        <span>Refresh Data</span>
+      </button>
+    </div>
+  </header>
+
+  <!-- Error banner -->
+  <div id="error-banner" class="hidden glass rounded-xl border-red-500/30 px-4 py-3 mb-6 text-sm text-red-300 items-center gap-3">
+    <svg class="h-5 w-5 shrink-0" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M12 9v4m0 4h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z"/></svg>
+    <span id="error-text" class="flex-1"></span>
+    <button id="retry-btn" class="rounded-lg border border-red-400/40 px-3 py-1 text-xs hover:bg-red-400/10 transition">Retry</button>
+  </div>
+
+  <!-- Hero -->
+  <section class="glass rounded-3xl p-6 sm:p-8 mb-6 relative overflow-hidden">
+    <div id="hero-glow" class="pointer-events-none absolute -top-24 -right-24 h-72 w-72 rounded-full blur-3xl opacity-30 transition-colors duration-700" style="background:#71717a"></div>
+    <div class="relative grid gap-6 md:grid-cols-2 md:items-center">
+      <div>
+        <p class="text-xs uppercase tracking-widest text-zinc-500 mb-2">Market Sentiment · 24h</p>
+        <h2 id="hero-label" class="text-4xl sm:text-5xl font-bold tracking-tight text-zinc-300 transition-colors duration-500">—</h2>
+        <p id="hero-sub" class="mt-2 text-sm text-zinc-400">Waiting for data…</p>
+      </div>
+      <div>
+        <div class="flex justify-between text-[11px] uppercase tracking-wider text-zinc-500 mb-2">
+          <span>Bearish</span><span>Neutral</span><span>Bullish</span>
+        </div>
+        <div class="relative h-3 rounded-full" style="background:linear-gradient(90deg,#ff4d6d,#52525b 50%,#34ff8f)">
+          <div id="gauge-dot" class="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 h-5 w-5 rounded-full bg-white border-4 border-zinc-900 shadow-lg" style="left:50%"></div>
+        </div>
+        <div class="mt-4 flex items-center justify-between text-xs text-zinc-500">
+          <span>Avg. 24h change: <b id="hero-avg" class="text-zinc-300">—</b></span>
+          <span>Next refresh in <b id="countdown" class="text-zinc-300 tabular-nums">60</b>s</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Coin cards -->
+  <section id="cards" class="grid gap-6 md:grid-cols-2 lg:grid-cols-3"></section>
+
+  <footer class="mt-8 text-center text-xs text-zinc-600">
+    Last updated: <span id="last-updated">—</span>
+  </footer>
+</div>
+
+<script>
+(() => {
+  const INTERVAL = 60;
+
+  const CG_URL = 'https://api.coingecko.com/api/v3/simple/price' +
+    '?ids=bitcoin,ethereum,solana&vs_currencies=usd&include_24hr_change=true&include_24hr_vol=true';
+  const BN_URL = 'https://data-api.binance.vision/api/v3/ticker/24hr?symbols=' +
+    encodeURIComponent('["BTCUSDT","ETHUSDT","SOLUSDT"]');
+
+  const COINS = [
+    { id: 'bitcoin',  sym: 'BTC', name: 'Bitcoin',  glyph: '₿', color: '#f7931a' },
+    { id: 'ethereum', sym: 'ETH', name: 'Ethereum', glyph: 'Ξ', color: '#8c9eff' },
+    { id: 'solana',   sym: 'SOL', name: 'Solana',   glyph: '◎', color: '#14f195' },
+  ];
+
+  const $ = (id) => document.getElementById(id);
+  const usd = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD',
+    minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(n);
+  const compact = (n) => '$' + new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 2 }).format(n);
+  const pct = (n) => (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+
+  const state = { prev: {}, loading: false, countdown: INTERVAL, hasData: false };
+
+  // ---------- Skeleton cards ----------
+  $('cards').innerHTML = COINS.map((c) => `
+    <article id="card-${c.id}" class="card glass rounded-3xl p-6 fade-in">
+      <div class="flex items-center justify-between mb-6">
+        <div class="flex items-center gap-3">
+          <div class="h-12 w-12 rounded-2xl grid place-items-center text-2xl font-bold"
+               style="background:${c.color}1f;border:1px solid ${c.color}55;color:${c.color}">${c.glyph}</div>
+          <div>
+            <h3 class="font-semibold text-white leading-tight">${c.name}</h3>
+            <span class="text-xs text-zinc-500 tracking-wider">${c.sym} / USD</span>
+          </div>
+        </div>
+        <span id="chg-${c.id}" class="skeleton h-7 w-24 inline-block"></span>
+      </div>
+      <div id="price-${c.id}" class="skeleton h-12 w-3/4 mb-6"></div>
+      <div class="border-t border-white/5 pt-4 flex items-center justify-between text-sm">
+        <span class="text-zinc-500">24h Volume</span>
+        <span id="vol-${c.id}" class="skeleton h-5 w-20 inline-block"></span>
+      </div>
+    </article>`).join('');
+
+  // ---------- Number tween ----------
+  function tween(el, from, to, fmt, ms = 800) {
+    cancelAnimationFrame(el._raf);
+    const start = performance.now();
+    const step = (t) => {
+      const p = ms === 0 ? 1 : Math.min(1, (t - start) / ms);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = fmt(from + (to - from) * eased);
+      if (p < 1) el._raf = requestAnimationFrame(step);
+    };
+    el._raf = requestAnimationFrame(step);
+  }
+
+  // ---------- Data fetching (CoinGecko → Binance fallback) ----------
+  async function getJSON(url, timeoutMs = 8000) {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+    try {
+      const res = await fetch(url, { signal: ctrl.signal });
+      if (res.status === 429) throw new Error('Rate limit reached (429).');
+      if (!res.ok) throw new Error(`API responded with status ${res.status}.`);
+      return await res.json();
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function fromCoinGecko() {
+    const j = await getJSON(CG_URL);
+    const out = {};
+    COINS.forEach((c) => {
+      const d = j[c.id];
+      if (!d || typeof d.usd !== 'number') throw new Error(`Missing data for ${c.name}.`);
+      out[c.id] = { usd: d.usd, change: d.usd_24h_change ?? 0, vol: d.usd_24h_vol ?? 0 };
+    });
+    return out;
+  }
+
+  async function fromBinance() {
+    const arr = await getJSON(BN_URL);
+    const map = { BTCUSDT: 'bitcoin', ETHUSDT: 'ethereum', SOLUSDT: 'solana' };
+    const out = {};
+    arr.forEach((t) => {
+      const id = map[t.symbol];
+      if (id) out[id] = { usd: +t.lastPrice, change: +t.priceChangePercent, vol: +t.quoteVolume };
+    });
+    COINS.forEach((c) => { if (!out[c.id]) throw new Error(`Missing data for ${c.name}.`); });
+    return out;
+  }
+
+  async function fetchPrices() {
+    try {
+      return { data: await fromCoinGecko(), source: 'CoinGecko' };
+    } catch (e1) {
+      try {
+        return { data: await fromBinance(), source: 'Binance' };
+      } catch (e2) {
+        const aborted = e2.name === 'AbortError';
+        throw new Error(
+          aborted ? 'Requests timed out. Check your connection.'
+          : e2 instanceof TypeError ? 'Network error — could not reach CoinGecko or Binance. Check for an ad blocker, VPN or firewall.'
+          : e2.message
+        );
+      }
+    }
+  }
+
+  // ---------- UI updates ----------
+  function updateCoin(c, d) {
+    const up = d.change >= 0;
+    const priceEl = $('price-' + c.id), chgEl = $('chg-' + c.id), volEl = $('vol-' + c.id);
+
+    priceEl.className = 'text-4xl sm:text-5xl font-bold tracking-tight tabular-nums mb-6 ' + (up ? 'up' : 'down');
+    const prev = state.prev[c.id];
+    tween(priceEl, prev ?? d.usd, d.usd, usd, prev == null ? 0 : 800);
+
+    chgEl.className = `inline-flex items-center gap-1 rounded-full px-3 py-1 text-sm font-semibold tabular-nums ${up ? 'pill-up up' : 'pill-down down'}`;
+    chgEl.innerHTML = `<svg class="h-3.5 w-3.5 ${up ? '' : 'rotate-180'}" fill="none" stroke="currentColor" stroke-width="3" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7"/></svg>${pct(d.change)}`;
+
+    volEl.className = 'font-medium text-zinc-200 tabular-nums';
+    volEl.textContent = compact(d.vol);
+
+    if (prev != null && prev !== d.usd) {
+      const card = $('card-' + c.id);
+      card.classList.remove('flash-up', 'flash-down');
+      void card.offsetWidth;
+      card.classList.add(d.usd > prev ? 'flash-up' : 'flash-down');
+    }
+    state.prev[c.id] = d.usd;
+  }
+
+  function updateHero(changes) {
+    const avg = changes.reduce((a, b) => a + b, 0) / changes.length;
+    let label, sub, color, glow;
+    if (avg >= 3)         { label = 'Extreme Greed'; sub = 'Strong buying momentum across majors.';  color = '#34ff8f'; glow = '#10b981'; }
+    else if (avg >= 0.75) { label = 'Bullish';       sub = 'Majors are trending up over 24h.';      color = '#34ff8f'; glow = '#10b981'; }
+    else if (avg > -0.75) { label = 'Neutral';       sub = 'The market is moving sideways.';        color = '#d4d4d8'; glow = '#71717a'; }
+    else if (avg > -3)    { label = 'Bearish';       sub = 'Majors are sliding over 24h.';          color = '#ff4d6d'; glow = '#f43f5e'; }
+    else                  { label = 'Extreme Fear';  sub = 'Heavy selling pressure across majors.'; color = '#ff4d6d'; glow = '#f43f5e'; }
+
+    const hl = $('hero-label');
+    hl.textContent = label;
+    hl.style.color = color;
+    hl.style.textShadow = `0 0 30px ${color}55`;
+    $('hero-sub').textContent = sub;
+    $('hero-avg').textContent = pct(avg);
+    $('hero-glow').style.background = glow;
+    $('gauge-dot').style.left = Math.min(100, Math.max(0, ((avg + 5) / 10) * 100)) + '%';
+  }
+
+  function setStatus(ok, text) {
+    $('status-text').textContent = text;
+    ['live-dot', 'live-ping'].forEach((id) => {
+      $(id).classList.remove('bg-emerald-400', 'bg-red-500');
+      $(id).classList.add(ok ? 'bg-emerald-400' : 'bg-red-500');
+    });
+  }
+  function showError(msg) {
+    $('error-text').textContent = msg;
+    $('error-banner').classList.remove('hidden');
+    $('error-banner').classList.add('flex');
+  }
+  function hideError() {
+    $('error-banner').classList.add('hidden');
+    $('error-banner').classList.remove('flex');
+  }
+  function setLoading(on) {
+    state.loading = on;
+    $('refresh-btn').disabled = on;
+    $('refresh-icon').classList.toggle('spin', on);
+    if (on) setStatus(true, 'Fetching…');
+  }
+
+  // ---------- Main loader ----------
+  async function loadData() {
+    if (state.loading) return;
+    setLoading(true);
+    state.countdown = INTERVAL;
+    $('countdown').textContent = INTERVAL;
+
+    try {
+      const { data, source } = await fetchPrices();
+      const changes = [];
+      COINS.forEach((c) => {
+        updateCoin(c, data[c.id]);
+        changes.push(data[c.id].change);
+      });
+      updateHero(changes);
+
+      state.hasData = true;
+      hideError();
+      $('last-updated').textContent = new Date().toLocaleTimeString() + ' · via ' + source;
+      setStatus(true, 'Live · ' + source);
+    } catch (err) {
+      showError(state.hasData ? err.message + ' Showing last known data.' : err.message);
+      setStatus(false, 'Offline');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ---------- Events & 60s auto-refresh ----------
+  $('refresh-btn').addEventListener('click', loadData);
+  $('retry-btn').addEventListener('click', loadData);
+
+  setInterval(() => {
+    if (state.loading) return;
+    state.countdown -= 1;
+    if (state.countdown <= 0) { loadData(); return; }
+    $('countdown').textContent = state.countdown;
+  }, 1000);
+
+  loadData();
+})();
+</script>
+</body>
+</html>
